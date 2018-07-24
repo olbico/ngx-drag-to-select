@@ -1,6 +1,6 @@
 {
-  "name": "olb-drag-to-select",
-  "version": "1.0.0",
+  "name": "ngx-drag-to-select",
+  "version": "0.0.0",
   "license": "MIT",
   "scripts": {
     "ng": "ng",

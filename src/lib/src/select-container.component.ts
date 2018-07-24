@@ -79,6 +79,7 @@ import {
 export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   host: SelectContainerHost;
   selectBoxStyles$: Observable<SelectBox<string>>;
+  mouseMoved: boolean | null = null;
 
   @ViewChild('selectBox') private $selectBox: ElementRef;
 
@@ -98,6 +99,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
   @Output() selectedItemsChange = new EventEmitter<any>();
   @Output() select = new EventEmitter<any>();
+  @Output() selectDragEnd = new EventEmitter<any>();
 
   private _tmpItems = new Map<SelectItemDirective, Action>();
 
@@ -131,6 +133,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
       const mousemove$ = fromEvent(window, 'mousemove').pipe(
         filter(() => !this.disabled),
+        tap(() => this.onMouseMove()),
         share()
       );
 
@@ -317,11 +320,20 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   }
 
   private onMouseUp() {
+    if (this.mouseMoved) this.selectDragEnd.emit(this.selectedItems);
+
+    this.mouseMoved = null;
+
     this.flushItems();
     this.renderer.removeClass(document.body, NO_SELECT_CLASS);
   }
 
+  private onMouseMove() {
+    if (this.mouseMoved != null) this.mouseMoved = true;
+  }
+
   private onMouseDown(event: MouseEvent) {
+    this.mouseMoved = false;
     if (this.shortcuts.disableSelection(event) || this.disabled) {
       return;
     }

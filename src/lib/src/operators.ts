@@ -1,6 +1,6 @@
 import { Observable } from 'rxjs/Observable';
 import { map } from 'rxjs/operators';
-import { SelectBox, SelectBoxInput, SelectContainerHost } from './models';
+import { SelectBox, SelectBoxInput, SelectContainerHost, MousePosition } from './models';
 import { getRelativeMousePosition } from './utils';
 
 export const createSelectBox = (container: SelectContainerHost) => (

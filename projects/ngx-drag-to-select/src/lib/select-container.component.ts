@@ -71,11 +71,12 @@ import {
   },
   template: `
     <ng-content></ng-content>
-    <div class="dts-select-box"
+    <div
+      class="dts-select-box"
       #selectBox
       [ngClass]="selectBoxClasses$ | async"
-      [ngStyle]="selectBoxStyles$ | async">
-    </div>
+      [ngStyle]="selectBoxStyles$ | async"
+    ></div>
   `,
   styleUrls: ['./select-container.component.scss']
 })
@@ -83,6 +84,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   host: SelectContainerHost;
   selectBoxStyles$: Observable<SelectBox<string>>;
   selectBoxClasses$: Observable<{ [key: string]: boolean }>;
+  mouseMoved: boolean | null = null;
 
   @ViewChild('selectBox')
   private $selectBox: ElementRef;
@@ -124,6 +126,9 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   @Output()
   itemDeselected = new EventEmitter<any>();
 
+  @Output()
+  selectDragEnd = new EventEmitter<any>();
+
   private _tmpItems = new Map<SelectItemDirective, Action>();
 
   private _selectedItems$ = new BehaviorSubject<Array<any>>([]);
@@ -159,6 +164,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
       const mousemove$ = fromEvent<MouseEvent>(window, 'mousemove').pipe(
         filter(() => !this.disabled),
+        tap(() => this.onMouseMove()),
         share()
       );
 
@@ -380,11 +386,20 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   }
 
   private _onMouseUp() {
+    if (this.mouseMoved) this.selectDragEnd.emit(this.selectedItems);
+
+    this.mouseMoved = null;
+
     this._flushItems();
     this.renderer.removeClass(document.body, NO_SELECT_CLASS);
   }
 
+  private onMouseMove() {
+    if (this.mouseMoved != null) this.mouseMoved = true;
+  }
+
   private _onMouseDown(event: MouseEvent) {
+    this.mouseMoved = false;
     if (this.shortcuts.disableSelection(event) || this.disabled) {
       return;
     }
@@ -482,8 +497,8 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
       const action = this.shortcuts.removeFromSelection(event)
         ? Action.Delete
         : this.shortcuts.addToSelection(event)
-          ? Action.Add
-          : Action.None;
+        ? Action.Add
+        : Action.None;
 
       this._tmpItems.set(item, action);
     } else if (shouldRemove) {

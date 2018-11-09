@@ -1,24 +1,12 @@
 {
-  "$schema": "../../node_modules/ng-packagr/package.schema.json",
   "name": "ngx-drag-to-select",
-  "version": "1.1.1",
-  "description": "A lightweight, fast, configurable and reactive drag-to-select component for Angular 5 and beyond",
+  "version": "3.0.1",
+  "description": "A lightweight, fast, configurable and reactive drag-to-select component for Angular 6 and beyond",
   "sideEffects": false,
   "peerDependencies": {
-    "@angular/core": ">=5.0.0",
-    "@angular/common": ">=5.0.0",
-    "rxjs": ">=5.5.0"
-  },
-  "ngPackage": {
-    "lib": {
-      "entryFile": "public_api.ts",
-      "languageLevel": [
-        "es2017",
-        "dom"
-      ],
-      "comments": "none"
-    },
-    "dest": "../../dist/lib"
+    "@angular/core": ">=6.0.0 || >=7.0.0",
+    "@angular/common": ">=6.0.0 || >=7.0.0",
+    "rxjs": ">=6.1.0"
   },
   "repository": {
     "type": "git",

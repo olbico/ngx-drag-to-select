@@ -1,14 +1,27 @@
-import { Directive, DoCheck, ElementRef, Inject, Input, OnInit, Renderer2, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
+
+import {
+  Directive,
+  DoCheck,
+  ElementRef,
+  EventEmitter,
+  Inject,
+  Input,
+  OnInit,
+  Output,
+  PLATFORM_ID,
+  Renderer2
+} from '@angular/core';
+
 import { DragToSelectConfig } from './models';
 import { CONFIG } from './tokens';
 import { calculateBoundingClientRect } from './utils';
 
 @Directive({
-  selector: '[selectItem]',
-  exportAs: 'selectItem',
+  selector: '[dtsSelectItem]',
+  exportAs: 'dtsSelectItem',
   host: {
-    class: 'ngx-select-item'
+    class: 'dts-select-item'
   }
 })
 export class SelectItemDirective implements OnInit, DoCheck {
@@ -16,10 +29,11 @@ export class SelectItemDirective implements OnInit, DoCheck {
 
   selected = false;
 
-  @Input() selectItem;
+  @Input()
+  dtsSelectItem;
 
   get value() {
-    return this.selectItem ? this.selectItem : this;
+    return this.dtsSelectItem ? this.dtsSelectItem : this;
   }
 
   constructor(
@@ -43,16 +57,16 @@ export class SelectItemDirective implements OnInit, DoCheck {
     return this._boundingClientRect;
   }
 
-  select() {
+  calculateBoundingClientRect() {
+    this._boundingClientRect = calculateBoundingClientRect(this.host.nativeElement);
+  }
+
+  _select() {
     this.selected = true;
   }
 
-  deselect() {
+  _deselect() {
     this.selected = false;
-  }
-
-  calculateBoundingClientRect() {
-    this._boundingClientRect = calculateBoundingClientRect(this.host.nativeElement);
   }
 
   private applySelectedClass() {

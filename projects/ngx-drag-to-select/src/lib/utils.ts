@@ -1,4 +1,5 @@
-import { MousePosition, SelectBox, BoundingBox, SelectContainerHost } from './models';
+import { MIN_HEIGHT, MIN_WIDTH } from './constants';
+import { BoundingBox, MousePosition, SelectBox, SelectContainerHost } from './models';
 
 export const isObject = (item: any) => {
   return item && typeof item === 'object' && !Array.isArray(item) && item !== null;
@@ -20,6 +21,10 @@ export function mergeDeep(target: Object, source: Object) {
 
   return target;
 }
+
+export const hasMinimumSize = (selectBox: SelectBox<number>, minWidth = MIN_WIDTH, minHeight = MIN_HEIGHT) => {
+  return selectBox.width > minWidth || selectBox.height > minHeight;
+};
 
 export const clearSelection = (window: Window) => {
   const selection = window.getSelection();
@@ -58,7 +63,7 @@ export const getMousePosition = (event: MouseEvent) => {
 };
 
 export const getScroll = () => {
-  if (!document) {
+  if (!document || !document.documentElement) {
     return {
       x: 0,
       y: 0

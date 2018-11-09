@@ -18,16 +18,7 @@ import {
 
 import { isPlatformBrowser } from '@angular/common';
 
-import { Observable } from 'rxjs/Observable';
-import { BehaviorSubject } from 'rxjs/BehaviorSubject';
-import { async } from 'rxjs/scheduler/async';
-import { Subject } from 'rxjs/Subject';
-import { combineLatest } from 'rxjs/observable/combineLatest';
-import { merge } from 'rxjs/observable/merge';
-import { empty } from 'rxjs/observable/empty';
-import { forkJoin } from 'rxjs/observable/forkJoin';
-import { fromEvent } from 'rxjs/observable/fromEvent';
-import { asap } from 'rxjs/scheduler/asap';
+import { Observable, Subject, combineLatest, merge, from, fromEvent, BehaviorSubject, asyncScheduler } from 'rxjs';
 
 import {
   switchMap,
@@ -40,19 +31,26 @@ import {
   share,
   withLatestFrom,
   distinctUntilChanged,
-  take,
   observeOn,
-  startWith,
-  concatMap,
-  mergeMap
+  startWith
 } from 'rxjs/operators';
 
 import { SelectItemDirective } from './select-item.directive';
 import { ShortcutService } from './shortcut.service';
 
-import { createSelectBox } from './operators';
-import { Action, SelectBox, MousePosition, SelectContainerHost, UpdateAction, UpdateActions } from './models';
-import { AUDIT_TIME, NO_SELECT_CLASS, MIN_WIDTH, MIN_HEIGHT } from './constants';
+import { createSelectBox, whenSelectBoxVisible } from './operators';
+
+import {
+  Action,
+  SelectBox,
+  MousePosition,
+  SelectContainerHost,
+  UpdateAction,
+  UpdateActions,
+  PredicateFn
+} from './models';
+
+import { AUDIT_TIME, NO_SELECT_CLASS } from './constants';
 
 import {
   inBoundingBox,
@@ -61,43 +59,70 @@ import {
   boxIntersects,
   calculateBoundingClientRect,
   getRelativeMousePosition,
-  getMousePosition
+  getMousePosition,
+  hasMinimumSize
 } from './utils';
 
 @Component({
-  selector: 'ngx-select-container',
-  exportAs: 'ngx-select-container',
+  selector: 'dts-select-container',
+  exportAs: 'dts-select-container',
   host: {
-    class: 'ngx-select-container'
+    class: 'dts-select-container'
   },
   template: `
     <ng-content></ng-content>
-    <div #selectBox [ngStyle]="selectBoxStyles$ | async" class="ngx-select-box"></div>
+    <div class="dts-select-box"
+      #selectBox
+      [ngClass]="selectBoxClasses$ | async"
+      [ngStyle]="selectBoxStyles$ | async">
+    </div>
   `,
   styleUrls: ['./select-container.component.scss']
 })
 export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   host: SelectContainerHost;
   selectBoxStyles$: Observable<SelectBox<string>>;
+  selectBoxClasses$: Observable<{ [key: string]: boolean }>;
 
-  @ViewChild('selectBox') private $selectBox: ElementRef;
+  @ViewChild('selectBox')
+  private $selectBox: ElementRef;
 
   @ContentChildren(SelectItemDirective, { descendants: true })
   private $selectableItems: QueryList<SelectItemDirective>;
 
-  @Input() selectedItems: any;
-  @Input() selectOnDrag = true;
-  @Input() disabled = false;
-  @Input() disableDrag = false;
-  @Input() selectMode = false;
-  @Input() selectWithShortcut = false;
+  @Input()
+  selectedItems: any;
 
   @Input()
-  @HostBinding('class.ngx-custom')
+  selectOnDrag = true;
+
+  @Input()
+  disabled = false;
+
+  @Input()
+  disableDrag = false;
+
+  @Input()
+  selectMode = false;
+
+  @Input()
+  selectWithShortcut = false;
+
+  @Input()
+  @HostBinding('class.dts-custom')
   custom = false;
 
-  @Output() selectedItemsChange = new EventEmitter<any>();
-  @Output() select = new EventEmitter<any>();
+  @Output()
+  selectedItemsChange = new EventEmitter<any>();
+
+  @Output()
+  select = new EventEmitter<any>();
+
+  @Output()
+  itemSelected = new EventEmitter<any>();
+
+  @Output()
+  itemDeselected = new EventEmitter<any>();
 
   private _tmpItems = new Map<SelectItemDirective, Action>();
 
@@ -117,33 +142,37 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
     if (isPlatformBrowser(this.platformId)) {
       this.host = this.hostElementRef.nativeElement;
 
-      this.initSelectedItemsChange();
+      this._initSelectedItemsChange();
 
-      this.calculateBoundingClientRect();
-      this.observeBoundingRectChanges();
-      this.observeSelectableItems();
+      this._calculateBoundingClientRect();
+      this._observeBoundingRectChanges();
+      this._observeSelectableItems();
 
-      const mouseup$ = fromEvent(window, 'mouseup').pipe(
+      const keydown$ = fromEvent<KeyboardEvent>(window, 'keydown').pipe(share());
+      const keyup$ = fromEvent<KeyboardEvent>(window, 'keyup').pipe(share());
+
+      const mouseup$ = fromEvent<MouseEvent>(window, 'mouseup').pipe(
         filter(() => !this.disabled),
-        tap(() => this.onMouseUp()),
+        tap(() => this._onMouseUp()),
         share()
       );
 
-      const mousemove$ = fromEvent(window, 'mousemove').pipe(
+      const mousemove$ = fromEvent<MouseEvent>(window, 'mousemove').pipe(
         filter(() => !this.disabled),
         share()
       );
 
-      const mousedown$ = fromEvent(this.host, 'mousedown').pipe(
+      const mousedown$ = fromEvent<MouseEvent>(this.host, 'mousedown').pipe(
+        filter(event => event.button === 0), // only emit left mouse
         filter(() => !this.disabled),
-        tap((event: MouseEvent) => this.onMouseDown(event)),
+        tap(event => this._onMouseDown(event)),
         share()
       );
 
       const dragging$ = mousedown$.pipe(
         filter(event => !this.shortcuts.disableSelection(event)),
-        filter(event => !this.selectMode),
-        filter(event => !this.disableDrag),
+        filter(() => !this.selectMode),
+        filter(() => !this.disableDrag),
         switchMap(() => mousemove$.pipe(takeUntil(mouseup$))),
         share()
       );
@@ -154,45 +183,62 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
       const show$ = dragging$.pipe(mapTo(1));
       const hide$ = mouseup$.pipe(mapTo(0));
-      const opacity$ = merge(show$, hide$, asap).pipe(distinctUntilChanged());
+      const opacity$ = merge(show$, hide$).pipe(distinctUntilChanged());
 
       const selectBox$ = combineLatest(dragging$, opacity$, currentMousePosition$).pipe(
         createSelectBox(this.host),
         share()
       );
 
-      mouseup$
-        .pipe(
-          filter(() => !this.selectOnDrag),
-          filter((event: MouseEvent) => this.cursorWithinHost(event)),
-          filter(
-            (event: MouseEvent) =>
-              (!this.shortcuts.disableSelection(event) && !this.shortcuts.toggleSingleItem(event)) ||
-              this.shortcuts.removeFromSelection(event)
-          ),
-          withLatestFrom(selectBox$),
-          map(([event, selectBox]) => ({
-            selectBox,
-            event
-          })),
-          tap(({ selectBox, event }) => this.selectItems(selectBox, event)),
-          takeUntil(this.destroy$)
-        )
-        .subscribe();
+      this.selectBoxClasses$ = merge(dragging$, mouseup$, keydown$, keyup$).pipe(
+        auditTime(AUDIT_TIME),
+        withLatestFrom(selectBox$),
+        map(([event, selectBox]) => {
+          return {
+            'dts-adding': hasMinimumSize(selectBox, 0, 0) && !this.shortcuts.removeFromSelection(event),
+            'dts-removing': this.shortcuts.removeFromSelection(event)
+          };
+        }),
+        distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b))
+      );
 
-      selectBox$
-        .pipe(
-          auditTime(AUDIT_TIME),
-          withLatestFrom(mousemove$, (selectBox, event: MouseEvent) => ({
-            selectBox,
-            event
-          })),
-          filter(() => this.selectOnDrag),
-          filter(({ selectBox }) => selectBox.width > MIN_WIDTH || selectBox.height > MIN_HEIGHT),
-          tap(({ selectBox, event }) => this.selectItems(selectBox, event)),
-          takeUntil(this.destroy$)
+      const selectOnMouseUp$ = mouseup$.pipe(
+        filter(() => !this.selectOnDrag),
+        filter(() => !this.selectMode),
+        filter(event => this._cursorWithinHost(event)),
+        filter(
+          event =>
+            (!this.shortcuts.disableSelection(event) && !this.shortcuts.toggleSingleItem(event)) ||
+            this.shortcuts.removeFromSelection(event)
         )
-        .subscribe();
+      );
+
+      const selectOnDrag$ = selectBox$.pipe(
+        auditTime(AUDIT_TIME),
+        withLatestFrom(mousemove$, (selectBox, event: MouseEvent) => ({
+          selectBox,
+          event
+        })),
+        filter(() => this.selectOnDrag),
+        filter(({ selectBox }) => hasMinimumSize(selectBox)),
+        map(({ event }) => event)
+      );
+
+      const selectOnKeyboardEvent$ = merge(keydown$, keyup$).pipe(
+        auditTime(AUDIT_TIME),
+        whenSelectBoxVisible(selectBox$),
+        tap(event => {
+          if (this._isExtendedSelection(event)) {
+            this._tmpItems.clear();
+          } else {
+            this._flushItems();
+          }
+        })
+      );
+
+      merge(selectOnMouseUp$, selectOnDrag$, selectOnKeyboardEvent$)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe(event => this._selectItems(event));
 
       this.selectBoxStyles$ = selectBox$.pipe(
         map(selectBox => ({
@@ -208,18 +254,30 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
   selectAll() {
     this.$selectableItems.forEach(item => {
-      this.selectItem(item);
+      this._selectItem(item);
     });
+  }
+
+  toggleItems<T>(predicate: PredicateFn<T>) {
+    this._filterSelectableItems(predicate).subscribe((item: SelectItemDirective) => this._toggleItem(item));
+  }
+
+  selectItems<T>(predicate: PredicateFn<T>) {
+    this._filterSelectableItems(predicate).subscribe((item: SelectItemDirective) => this._selectItem(item));
+  }
+
+  deselectItems<T>(predicate: PredicateFn<T>) {
+    this._filterSelectableItems(predicate).subscribe((item: SelectItemDirective) => this._deselectItem(item));
   }
 
   clearSelection() {
     this.$selectableItems.forEach(item => {
-      this.deselectItem(item);
+      this._deselectItem(item);
     });
   }
 
   update() {
-    this.calculateBoundingClientRect();
+    this._calculateBoundingClientRect();
     this.$selectableItems.forEach(item => item.calculateBoundingClientRect());
   }
 
@@ -228,7 +286,14 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  private initSelectedItemsChange() {
+  private _filterSelectableItems<T>(predicate: PredicateFn<T>) {
+    // Wrap select items in an observable for better efficiency as
+    // no intermediate arrays are created and we only need to process
+    // every item once.
+    return from(this.$selectableItems.toArray()).pipe(filter(item => predicate(item.value)));
+  }
+
+  private _initSelectedItemsChange() {
     this._selectedItems$
       .pipe(
         auditTime(AUDIT_TIME),
@@ -245,52 +310,50 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
       });
   }
 
-  private observeSelectableItems() {
+  private _observeSelectableItems() {
     // Listen for updates and either select or deselect an item
     this.updateItems$
       .pipe(
         withLatestFrom(this._selectedItems$),
-        tap(([update, selectedItems]: [UpdateAction, any[]]) => {
-          const item = update.item;
-
-          switch (update.type) {
-            case UpdateActions.Add:
-              if (this.addItem(item, selectedItems)) {
-                item.select();
-              }
-              break;
-            case UpdateActions.Remove:
-              if (this.removeItem(item, selectedItems)) {
-                item.deselect();
-              }
-              break;
-          }
-        }),
         takeUntil(this.destroy$)
       )
-      .subscribe();
+      .subscribe(([update, selectedItems]: [UpdateAction, any[]]) => {
+        const item = update.item;
+
+        switch (update.type) {
+          case UpdateActions.Add:
+            if (this._addItem(item, selectedItems)) {
+              item._select();
+            }
+            break;
+          case UpdateActions.Remove:
+            if (this._removeItem(item, selectedItems)) {
+              item._deselect();
+            }
+            break;
+        }
+      });
 
     // Update the container as well as all selectable items if the list has changed
     this.$selectableItems.changes
       .pipe(
         withLatestFrom(this._selectedItems$),
-        observeOn(async),
-        tap(([items, selectedItems]: [QueryList<SelectItemDirective>, any[]]) => {
-          const newList = items.toArray();
-          const removedItems = selectedItems.filter(item => !newList.includes(item.value));
-
-          if (removedItems.length) {
-            removedItems.forEach(item => this.removeItem(item, selectedItems));
-          }
-
-          this.update();
-        }),
+        observeOn(asyncScheduler),
         takeUntil(this.destroy$)
       )
-      .subscribe();
+      .subscribe(([items, selectedItems]: [QueryList<SelectItemDirective>, any[]]) => {
+        const newList = items.toArray();
+        const removedItems = selectedItems.filter(item => !newList.includes(item.value));
+
+        if (removedItems.length) {
+          removedItems.forEach(item => this._removeItem(item, selectedItems));
+        }
+
+        this.update();
+      });
   }
 
-  private observeBoundingRectChanges() {
+  private _observeBoundingRectChanges() {
     this.ngZone.runOutsideAngular(() => {
       const resize$ = fromEvent(window, 'resize');
       const windowScroll$ = fromEvent(window, 'scroll');
@@ -308,20 +371,20 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
     });
   }
 
-  private calculateBoundingClientRect() {
+  private _calculateBoundingClientRect() {
     this.host.boundingClientRect = calculateBoundingClientRect(this.host);
   }
 
-  private cursorWithinHost(event: MouseEvent) {
+  private _cursorWithinHost(event: MouseEvent) {
     return cursorWithinElement(event, this.host);
   }
 
-  private onMouseUp() {
-    this.flushItems();
+  private _onMouseUp() {
+    this._flushItems();
     this.renderer.removeClass(document.body, NO_SELECT_CLASS);
   }
 
-  private onMouseDown(event: MouseEvent) {
+  private _onMouseDown(event: MouseEvent) {
     if (this.shortcuts.disableSelection(event) || this.disabled) {
       return;
     }
@@ -363,26 +426,30 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
         (withinBoundingBox && item.selected && this.selectMode);
 
       if (shouldAdd) {
-        this.selectItem(item);
+        this._selectItem(item);
       } else if (shouldRemove) {
-        this.deselectItem(item);
+        this._deselectItem(item);
       }
     });
   }
 
-  private selectItems(selectBox: SelectBox<number>, event: MouseEvent) {
+  private _selectItems(event: Event) {
     const selectionBox = calculateBoundingClientRect(this.$selectBox.nativeElement);
 
-    this.$selectableItems.forEach((item, index) => {
-      if (this.shortcuts.extendedSelectionShortcut(event) && this.selectOnDrag) {
-        this.extendedSelectionMode(selectionBox, item, event);
+    this.$selectableItems.forEach(item => {
+      if (this._isExtendedSelection(event)) {
+        this._extendedSelectionMode(selectionBox, item, event);
       } else {
-        this.normalSelectionMode(selectionBox, item, event);
+        this._normalSelectionMode(selectionBox, item, event);
       }
     });
   }
 
-  private normalSelectionMode(selectBox, item: SelectItemDirective, event: MouseEvent) {
+  private _isExtendedSelection(event: Event) {
+    return this.shortcuts.extendedSelectionShortcut(event) && this.selectOnDrag;
+  }
+
+  private _normalSelectionMode(selectBox, item: SelectItemDirective, event: Event) {
     const inSelection = boxIntersects(selectBox, item.getBoundingClientRect());
 
     const shouldAdd = inSelection && !item.selected && !this.shortcuts.removeFromSelection(event);
@@ -392,13 +459,13 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
       (inSelection && item.selected && this.shortcuts.removeFromSelection(event));
 
     if (shouldAdd) {
-      this.selectItem(item);
+      this._selectItem(item);
     } else if (shouldRemove) {
-      this.deselectItem(item);
+      this._deselectItem(item);
     }
   }
 
-  private extendedSelectionMode(selectBox, item: SelectItemDirective, event: MouseEvent) {
+  private _extendedSelectionMode(selectBox, item: SelectItemDirective, event: Event) {
     const inSelection = boxIntersects(selectBox, item.getBoundingClientRect());
 
     const shoudlAdd =
@@ -410,7 +477,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
       (!inSelection && !item.selected && this.shortcuts.removeFromSelection(event) && this._tmpItems.has(item));
 
     if (shoudlAdd) {
-      item.selected ? item.deselect() : item.select();
+      item.selected ? item._deselect() : item._select();
 
       const action = this.shortcuts.removeFromSelection(event)
         ? Action.Delete
@@ -420,38 +487,39 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
       this._tmpItems.set(item, action);
     } else if (shouldRemove) {
-      this.shortcuts.removeFromSelection(event) ? item.select() : item.deselect();
+      this.shortcuts.removeFromSelection(event) ? item._select() : item._deselect();
       this._tmpItems.delete(item);
     }
   }
 
-  private flushItems() {
+  private _flushItems() {
     this._tmpItems.forEach((action, item) => {
       if (action === Action.Add) {
-        this.selectItem(item);
+        this._selectItem(item);
       }
 
       if (action === Action.Delete) {
-        this.deselectItem(item);
+        this._deselectItem(item);
       }
     });
 
     this._tmpItems.clear();
   }
 
-  private addItem(item: SelectItemDirective, selectedItems: Array<any>) {
+  private _addItem(item: SelectItemDirective, selectedItems: Array<any>) {
     let success = false;
 
-    if (!this.hasItem(item, selectedItems)) {
+    if (!this._hasItem(item, selectedItems)) {
       success = true;
       selectedItems.push(item.value);
       this._selectedItems$.next(selectedItems);
+      this.itemSelected.emit(item.value);
     }
 
     return success;
   }
 
-  private removeItem(item: SelectItemDirective, selectedItems: Array<any>) {
+  private _removeItem(item: SelectItemDirective, selectedItems: Array<any>) {
     let success = false;
     const value = item instanceof SelectItemDirective ? item.value : item;
     const index = selectedItems.indexOf(value);
@@ -460,20 +528,29 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
       success = true;
       selectedItems.splice(index, 1);
       this._selectedItems$.next(selectedItems);
+      this.itemDeselected.emit(item.value);
     }
 
     return success;
   }
 
-  private selectItem(item: SelectItemDirective) {
+  private _toggleItem(item: SelectItemDirective) {
+    if (item.selected) {
+      this._deselectItem(item);
+    } else {
+      this._selectItem(item);
+    }
+  }
+
+  private _selectItem(item: SelectItemDirective) {
     this.updateItems$.next({ type: UpdateActions.Add, item });
   }
 
-  private deselectItem(item: SelectItemDirective) {
+  private _deselectItem(item: SelectItemDirective) {
     this.updateItems$.next({ type: UpdateActions.Remove, item });
   }
 
-  private hasItem(item: SelectItemDirective, selectedItems: Array<any>) {
+  private _hasItem(item: SelectItemDirective, selectedItems: Array<any>) {
     return selectedItems.includes(item.value);
   }
 }

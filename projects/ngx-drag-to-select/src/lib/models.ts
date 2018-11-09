@@ -1,5 +1,7 @@
-import { Observable } from 'rxjs/Observable';
+import { Observable } from 'rxjs';
 import { SelectItemDirective } from './select-item.directive';
+
+export type PredicateFn<T> = (item: T) => boolean;
 
 export enum UpdateActions {
   Add,

@@ -1,12 +1,12 @@
-import { Component, OnInit, ViewChild } from '@angular/core';
-import { Title, DomSanitizer } from '@angular/platform-browser';
-import { MatIconRegistry } from '@angular/material';
 import { BreakpointObserver, Breakpoints } from '@angular/cdk/layout';
+import { Component, OnInit } from '@angular/core';
+import { MatIconRegistry } from '@angular/material';
+import { DomSanitizer, Title } from '@angular/platform-browser';
 
-const json = require('../lib/package.json');
+const json = require('../../projects/ngx-drag-to-select/package.json');
 
 @Component({
-  selector: 'ngx-root',
+  selector: 'app-root',
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
@@ -22,8 +22,8 @@ export class AppComponent implements OnInit {
   constructor(
     private titleService: Title,
     private breakpointObserver: BreakpointObserver,
-    private iconRegistry: MatIconRegistry,
-    private sanitizer: DomSanitizer
+    iconRegistry: MatIconRegistry,
+    sanitizer: DomSanitizer
   ) {
     iconRegistry.addSvgIcon('apple', sanitizer.bypassSecurityTrustResourceUrl('assets/apple-icon.svg'));
     iconRegistry.addSvgIcon('windows', sanitizer.bypassSecurityTrustResourceUrl('assets/windows-icon.svg'));

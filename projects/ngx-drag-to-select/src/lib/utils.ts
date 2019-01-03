@@ -94,3 +94,11 @@ export const cursorWithinElement = (event: MouseEvent, element: HTMLElement) => 
   const mousePoint = getMousePosition(event);
   return inBoundingBox(mousePoint, calculateBoundingClientRect(element));
 };
+
+export const getDistance = (positionA: MousePosition, positionB: MousePosition): number => {
+  let a = positionA.x - positionB.x;
+  let b = positionA.y - positionB.y;
+  let c = Math.sqrt(a * a + b * b);
+
+  return c;
+};

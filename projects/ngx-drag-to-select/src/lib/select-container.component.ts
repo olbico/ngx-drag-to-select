@@ -60,7 +60,8 @@ import {
   calculateBoundingClientRect,
   getRelativeMousePosition,
   getMousePosition,
-  hasMinimumSize
+  hasMinimumSize,
+  getDistance
 } from './utils';
 
 @Component({
@@ -85,6 +86,9 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   selectBoxStyles$: Observable<SelectBox<string>>;
   selectBoxClasses$: Observable<{ [key: string]: boolean }>;
   mouseMoved: boolean | null = null;
+
+  startPosition: MousePosition;
+  endPosition: MousePosition;
 
   @ViewChild('selectBox')
   private $selectBox: ElementRef;
@@ -113,6 +117,9 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
   @Input()
   @HostBinding('class.dts-custom')
   custom = false;
+
+  @Input()
+  minimalDragDistance = 10;
 
   @Output()
   selectedItemsChange = new EventEmitter<any>();
@@ -158,7 +165,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
       const mouseup$ = fromEvent<MouseEvent>(window, 'mouseup').pipe(
         filter(() => !this.disabled),
-        tap(() => this._onMouseUp()),
+        tap(() => this._onMouseUp(event)),
         share()
       );
 
@@ -385,10 +392,14 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
     return cursorWithinElement(event, this.host);
   }
 
-  private _onMouseUp() {
-    if (this.mouseMoved) this.selectDragEnd.emit(this.selectedItems);
+  private _onMouseUp(event: MouseEvent) {
+    this.endPosition = getMousePosition(event);
+    if (this.mouseMoved && getDistance(this.startPosition, this.endPosition) > this.minimalDragDistance) {
+      this.selectDragEnd.emit(this.selectedItems);
+    }
 
     this.mouseMoved = null;
+    this.startPosition = null;
 
     this._flushItems();
     this.renderer.removeClass(document.body, NO_SELECT_CLASS);
@@ -400,6 +411,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
   private _onMouseDown(event: MouseEvent) {
     this.mouseMoved = false;
+    this.startPosition = getMousePosition(event);
     if (this.shortcuts.disableSelection(event) || this.disabled) {
       return;
     }

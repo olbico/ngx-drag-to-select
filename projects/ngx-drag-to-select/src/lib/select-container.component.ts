@@ -165,7 +165,7 @@ export class SelectContainerComponent implements AfterViewInit, OnDestroy {
 
       const mouseup$ = fromEvent<MouseEvent>(window, 'mouseup').pipe(
         filter(() => !this.disabled),
-        tap(() => this._onMouseUp(event)),
+        tap(event => this._onMouseUp(event)),
         share()
       );
 
